@@ -8,6 +8,48 @@
 import type { VertexModelConfig } from "../types.js";
 
 export const GEMINI_MODELS: VertexModelConfig[] = [
+  // --- Gemini 3.5 (GA - pricing until 12/31/26) ---
+  {
+    id: "gemini-3.5-flash",
+    name: "Gemini 3.5 Flash",
+    apiId: "gemini-3.5-flash",
+    publisher: "google",
+    endpointType: "gemini",
+    contextWindow: 1048576,
+    maxTokens: 65535,
+    input: ["text", "image"],
+    reasoning: true,
+    tools: true,
+    cost: {
+      input: 0.75,
+      output: 3.75,
+      cacheRead: 0.075,
+      cacheWrite: 0,
+    },
+    region: "global",
+  },
+  
+  // --- Gemini 3.6 (GA - pricing until 12/31/26) ---
+  {
+    id: "gemini-3.6-flash",
+    name: "Gemini 3.6 Flash",
+    apiId: "gemini-3.6-flash",
+    publisher: "google",
+    endpointType: "gemini",
+    contextWindow: 1048576,
+    maxTokens: 65535,
+    input: ["text", "image"],
+    reasoning: true,
+    tools: true,
+    cost: {
+      input: 0.75,
+      output: 3.75,
+      cacheRead: 0.075,
+      cacheWrite: 0,
+    },
+    region: "global",
+  },
+  
   // --- Gemini 3.5 (GA) ---
   {
     id: "gemini-3.5-flash",
@@ -24,6 +66,26 @@ export const GEMINI_MODELS: VertexModelConfig[] = [
       input: 1.5,
       output: 9.0,
       cacheRead: 0.15,
+      cacheWrite: 0,
+    },
+    region: "global",
+  },
+
+  {
+    id: "gemini-3.5-flash-lite",
+    name: "Gemini 3.5 Flash Lite",
+    apiId: "gemini-3.5-flash-lite-preview",
+    publisher: "google",
+    endpointType: "gemini",
+    contextWindow: 1048576,
+    maxTokens: 65535,
+    input: ["text", "image"],
+    reasoning: true,
+    tools: true,
+    cost: {
+      input: 0.3,
+      output: 2.5,
+      cacheRead: 0.03,
       cacheWrite: 0,
     },
     region: "global",
