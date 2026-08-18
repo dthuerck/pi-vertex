@@ -49,7 +49,7 @@ function toPiModel(config: VertexModelConfig): Model<Api> {
     name: config.name,
     api: "vertex-unified",
     provider: "vertex",
-    baseUrl: "", // Will be set dynamically
+    baseUrl: "https://aiplatform.googleapis.com", // Will be set dynamically
     reasoning: config.reasoning,
     input: config.input,
     cost: config.cost,
