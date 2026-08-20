@@ -70,11 +70,10 @@ export const GEMINI_MODELS: VertexModelConfig[] = [
     },
     region: "global",
   },
-
   {
     id: "gemini-3.5-flash-lite",
     name: "Gemini 3.5 Flash Lite",
-    apiId: "gemini-3.5-flash-lite-preview",
+    apiId: "gemini-3.5-flash-lite",
     publisher: "google",
     endpointType: "gemini",
     contextWindow: 1048576,
