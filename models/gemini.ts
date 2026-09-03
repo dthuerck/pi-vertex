@@ -8,6 +8,27 @@
 import type { VertexModelConfig } from "../types.js";
 
 export const GEMINI_MODELS: VertexModelConfig[] = [
+  // --- Gemini 3.8 (GA - pricing until 12/31/26) ---
+  {
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    apiId: "gemini-3.8-flash",
+    publisher: "google",
+    endpointType: "gemini",
+    contextWindow: 1048576,
+    maxTokens: 65535,
+    input: ["text", "image"],
+    reasoning: true,
+    tools: true,
+    cost: {
+      input: 0.75,
+      output: 3.75,
+      cacheRead: 0.075,
+      cacheWrite: 0,
+    },
+    region: "global",
+  },
+  
   // --- Gemini 3.7 (GA - pricing until 12/31/26) ---
   {
     id: "gemini-3.7-flash",
