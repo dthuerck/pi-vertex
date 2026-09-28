@@ -26,6 +26,7 @@ vi.mock("@google/genai", () => ({
 
 vi.mock("../auth.js", () => ({
   getAuthConfig: mocks.getAuthConfig,
+  getGoogleAuthOptions: () => ({ scopes: [] }),
   resolveLocation: mocks.resolveLocation,
 }));
 
@@ -179,6 +180,61 @@ describe("streamGemini", () => {
     expect(done.message.usage.cost.output).toBeCloseTo(0.00025);
     expect(done.message.usage.cost.cacheRead).toBeCloseTo(0.000008);
     expect(done.message.usage.cost.total).toBeCloseTo(0.000378);
+  });
+
+  it("reads system prompt and tools from pi >= 0.87 transcript system messages", async () => {
+    const params = { type: "object", properties: {} } as any;
+    const transcript = {
+      messages: [
+        {
+          role: "system",
+          content: "base prompt",
+          sections: { rules: "<rules>be nice</rules>" },
+          toolsAdded: [
+            { name: "read", description: "read a file", parameters: params },
+            { name: "bash", description: "run bash", parameters: params },
+          ],
+          timestamp: 0,
+        },
+        { role: "user", content: "hello", timestamp: 1 },
+        {
+          role: "system",
+          content: "extra",
+          sections: { rules: null },
+          toolsRemoved: [{ name: "bash" }],
+          timestamp: 2,
+        },
+      ],
+    };
+
+    await collectEvents(streamGemini(makeModel(), transcript));
+
+    const call = mocks.generateContentStream.mock.calls[0][0];
+    expect(call.config.systemInstruction).toBe("base prompt\n\nextra");
+    expect(call.config.tools[0].functionDeclarations.map((t: any) => t.name)).toEqual(["read"]);
+    // System messages must not leak into the conversation contents.
+    expect(call.contents).toEqual([{ role: "user", parts: [{ text: "hello" }] }]);
+  });
+
+  it("invokes onPayload (with replacement) and onResponse", async () => {
+    mocks.generateContentStream.mockReturnValue(
+      chunks([
+        {
+          sdkHttpResponse: { headers: { "x-test": "1" } },
+          candidates: [{ finishReason: "STOP" }],
+        },
+      ]),
+    );
+    const piModel = { id: "gemini-2.5-pro" };
+    const onPayload = vi.fn((payload: any, _model: unknown) => ({ ...payload, model: "replaced" }));
+    const onResponse = vi.fn();
+
+    await collectEvents(streamGemini(makeModel(), baseContext, { onPayload, onResponse }, piModel));
+
+    expect(onPayload).toHaveBeenCalledOnce();
+    expect(onPayload.mock.calls[0][1]).toBe(piModel);
+    expect(mocks.generateContentStream.mock.calls[0][0].model).toBe("replaced");
+    expect(onResponse).toHaveBeenCalledWith({ status: 200, headers: { "x-test": "1" } }, piModel);
   });
 
   it("terminates safety finish reasons as error events", async () => {

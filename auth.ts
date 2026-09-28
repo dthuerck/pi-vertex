@@ -1,112 +1,110 @@
 /**
- * Authentication utilities for Vertex AI
- * Uses Google Application Default Credentials (ADC)
+ * Authentication utilities for Vertex AI.
  *
- * Resolution order for each value: config file → env var → default
+ * Configuration comes exclusively from environment variables, using the same names
+ * (and resolution order) as pi-vertex-anthropic. For each setting the first non-empty
+ * source wins:
+ *
+ *   Project:      VERTEX_PROJECT_ID → ANTHROPIC_VERTEX_PROJECT_ID → GOOGLE_CLOUD_PROJECT → GCLOUD_PROJECT
+ *   Region:       VERTEX_REGION → CLOUD_ML_REGION → GOOGLE_CLOUD_LOCATION → model default
+ *   Credentials:  VERTEX_SERVICE_ACCOUNT_KEY → GOOGLE_APPLICATION_CREDENTIALS → ADC
+ *
+ * If no key file is configured, Google Application Default Credentials are used
+ * (e.g. `gcloud auth application-default login` or the GCE metadata server).
  */
 
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { GoogleAuth } from "google-auth-library";
-import { getConfigPath, loadConfig } from "./config.js";
 import type { AuthConfig } from "./types.js";
 
-const DEFAULT_ADC_PATH = join(
-  homedir(),
-  ".config",
-  "gcloud",
-  "application_default_credentials.json",
-);
+const SCOPES = ["https://www.googleapis.com/auth/cloud-platform"];
 
-/**
- * Check if ADC credentials exist.
- * Checks config credentialsFile → GOOGLE_APPLICATION_CREDENTIALS → default ADC path.
- */
-export function hasAdcCredentials(): boolean {
-  const config = loadConfig();
-  const adcPath =
-    config.googleApplicationCredentials ||
-    process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-    DEFAULT_ADC_PATH;
-  return existsSync(adcPath);
+function firstEnv(...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return undefined;
 }
 
-/**
- * Resolve project ID.
- * Checks config.googleCloudProject → GOOGLE_CLOUD_PROJECT → GCLOUD_PROJECT.
- */
+/** Resolve the GCP project ID. */
 export function resolveProjectId(): string | undefined {
-  const config = loadConfig();
-  return (
-    config.googleCloudProject || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT
+  return firstEnv(
+    "VERTEX_PROJECT_ID",
+    "ANTHROPIC_VERTEX_PROJECT_ID",
+    "GOOGLE_CLOUD_PROJECT",
+    "GCLOUD_PROJECT",
   );
 }
 
-/**
- * Resolve location/region.
- * Checks config.googleCloudLocation → GOOGLE_CLOUD_LOCATION → CLOUD_ML_REGION → defaultLocation.
- */
+/** Resolve the Vertex location/region, falling back to `defaultLocation`. */
 export function resolveLocation(defaultLocation = "us-central1"): string {
-  const config = loadConfig();
-  return (
-    config.googleCloudLocation ||
-    process.env.GOOGLE_CLOUD_LOCATION ||
-    process.env.CLOUD_ML_REGION ||
-    defaultLocation
-  );
+  return firstEnv("VERTEX_REGION", "CLOUD_ML_REGION", "GOOGLE_CLOUD_LOCATION") || defaultLocation;
+}
+
+/** Resolve the service account key file, if one is configured. */
+export function resolveKeyFile(): string | undefined {
+  return firstEnv("VERTEX_SERVICE_ACCOUNT_KEY", "GOOGLE_APPLICATION_CREDENTIALS");
 }
 
 /**
- * Get authentication configuration.
+ * Get authentication configuration for a request.
  */
 export function getAuthConfig(preferredRegion?: string): AuthConfig {
   const projectId = resolveProjectId();
   if (!projectId) {
     throw new Error(
-      `Vertex AI requires a project ID.\n  Config file: set "project" in ${getConfigPath()}\n  Env var: export GOOGLE_CLOUD_PROJECT=your-project-id\n  Also ensure you've run: gcloud auth application-default login`,
-    );
-  }
-
-  if (!hasAdcCredentials()) {
-    throw new Error(
-      `Vertex AI requires Application Default Credentials.\n  Run: gcloud auth application-default login\n  Or set "credentialsFile" in ${getConfigPath()}`,
+      "Vertex AI requires a project ID. Set VERTEX_PROJECT_ID (or ANTHROPIC_VERTEX_PROJECT_ID / GOOGLE_CLOUD_PROJECT).",
     );
   }
 
   return {
     projectId,
     location: preferredRegion || resolveLocation(),
+    credentials: resolveKeyFile(),
   };
 }
 
+/** Options for google-auth-library, honoring an explicitly configured key file. */
+export function getGoogleAuthOptions(): { scopes: string[]; keyFilename?: string } {
+  const keyFilename = resolveKeyFile();
+  return { scopes: SCOPES, ...(keyFilename ? { keyFilename } : {}) };
+}
+
+let cachedAuth: { key: string; auth: GoogleAuth } | undefined;
+
+/** Shared GoogleAuth instance (re-created if the key file changes). */
+export function getGoogleAuth(): GoogleAuth {
+  const options = getGoogleAuthOptions();
+  const key = options.keyFilename ?? "";
+  if (!cachedAuth || cachedAuth.key !== key) {
+    cachedAuth = { key, auth: new GoogleAuth(options) };
+  }
+  return cachedAuth.auth;
+}
+
 /**
- * Get access token for HTTP requests.
- * Uses credentialsFile from config if set, otherwise relies on ADC.
+ * Get an access token for raw HTTP requests.
  */
 export async function getAccessToken(): Promise<string> {
-  const config = loadConfig();
-  const auth = new GoogleAuth({
-    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-    ...(config.googleApplicationCredentials
-      ? { keyFile: config.googleApplicationCredentials }
-      : {}),
-  });
-  const client = await auth.getClient();
+  const client = await getGoogleAuth().getClient();
   const token = await client.getAccessToken();
   if (!token.token) {
-    throw new Error("Failed to get access token from ADC");
+    throw new Error("Failed to obtain a Google Cloud access token");
   }
   return token.token;
+}
+
+/** Hostname of the Vertex AI endpoint for a location. */
+export function resolveVertexHost(location: string): string {
+  if (location === "global") return "aiplatform.googleapis.com";
+  // Multi-region endpoints (us, eu) live on the regional-endpoint domain.
+  if (location === "us" || location === "eu") return `aiplatform.${location}.rep.googleapis.com`;
+  return `${location}-aiplatform.googleapis.com`;
 }
 
 /**
  * Build the base URL for Vertex AI endpoints
  */
 export function buildBaseUrl(projectId: string, location: string): string {
-  // Global endpoint uses aiplatform.googleapis.com without region prefix
-  if (location === "global") {
-    return `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/global`;
-  }
-  return `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}`;
+  return `https://${resolveVertexHost(location)}/v1/projects/${projectId}/locations/${location}`;
 }

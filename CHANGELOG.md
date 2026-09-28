@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-05-22
+### Added
+- **Gemini 3.6 Flash** (`gemini-3.6-flash`) and **Gemini 3.7 Flash** (`gemini-3.7-flash`) — 1M context, 65,535 max output, reasoning, tools, $0.75/$3.75 per 1M tokens (verified live on Vertex).
+### Changed
+- **Renamed to `pi-vertex-gemini`** (was `@lhl/pi-vertex`). Provider id stays `vertex`.
+- **pi 0.87 support**: imports moved to `@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent`; `streamSimpleOpenAICompletions` now comes from `@earendil-works/pi-ai/compat`.
+- **Env-var-only configuration**, using the same variables as `pi-vertex-anthropic`: `VERTEX_PROJECT_ID` / `ANTHROPIC_VERTEX_PROJECT_ID` / `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT`, `VERTEX_REGION` / `CLOUD_ML_REGION` / `GOOGLE_CLOUD_LOCATION`, `VERTEX_SERVICE_ACCOUNT_KEY` / `GOOGLE_APPLICATION_CREDENTIALS`. Removed the `~/.pi/agent/settings/pi-vertex.json` config file and the startup ADC-file check.
+### Fixed
+- **Broken with pi 0.87**: providers now receive a `TranscriptContext` (messages only). System prompt and tools are read from transcript `role: "system"` messages (`toolsAdded` / `toolsRemoved` / `sections`), and system messages are filtered out of the conversation. Legacy `Context` still works.
+- Implemented the `onPayload` / `onResponse` / `fetch` provider contract for Gemini and Claude paths (OpenAI-compat MaaS path delegates to pi-ai, which already honors it).
+- Multi-region `us` / `eu` locations now route Claude requests to `aiplatform.{us,eu}.rep.googleapis.com`.
+
 ## [1.1.9] - 2026-05-20
 ### Added
 - **Gemini 3.5 Flash** (`gemini-3.5-flash`) — GA Vertex model with 1M input context, 65,535 max output tokens, reasoning, tool support, and $1.50/$9.00 per 1M token global pricing.

@@ -49,7 +49,7 @@ describe("streamVertex dispatch", () => {
     const result = streamVertex(model, baseContext, baseOptions);
 
     expect(streamGemini).toHaveBeenCalledOnce();
-    expect(streamGemini).toHaveBeenCalledWith(model, baseContext, baseOptions);
+    expect(streamGemini).toHaveBeenCalledWith(model, baseContext, baseOptions, undefined);
     expect(result).toEqual({ model: "gemini-2.5-pro", source: "gemini" });
   });
 
@@ -58,7 +58,7 @@ describe("streamVertex dispatch", () => {
     const result = streamVertex(model, baseContext, baseOptions);
 
     expect(streamMaaS).toHaveBeenCalledOnce();
-    expect(streamMaaS).toHaveBeenCalledWith(model, baseContext, baseOptions);
+    expect(streamMaaS).toHaveBeenCalledWith(model, baseContext, baseOptions, undefined);
     expect(result).toEqual({ model: "claude-opus-4-6", source: "maas" });
   });
 

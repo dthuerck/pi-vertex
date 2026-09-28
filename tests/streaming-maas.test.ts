@@ -18,19 +18,18 @@ vi.mock("@anthropic-ai/vertex-sdk", () => ({
   AnthropicVertex: mocks.anthropicVertex,
 }));
 
-vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@mariozechner/pi-ai")>();
-  return {
-    ...actual,
-    streamSimpleOpenAICompletions: mocks.streamSimpleOpenAICompletions,
-  };
-});
+vi.mock("@earendil-works/pi-ai/compat", () => ({
+  streamSimpleOpenAICompletions: mocks.streamSimpleOpenAICompletions,
+}));
 
 vi.mock("../auth.js", () => ({
   getAuthConfig: mocks.getAuthConfig,
   resolveLocation: mocks.resolveLocation,
   getAccessToken: mocks.getAccessToken,
   buildBaseUrl: mocks.buildBaseUrl,
+  getGoogleAuth: () => ({}),
+  resolveVertexHost: (location: string) =>
+    location === "global" ? "aiplatform.googleapis.com" : `${location}-aiplatform.googleapis.com`,
 }));
 
 // Import AFTER mocks are registered
@@ -177,7 +176,7 @@ describe("streamMaaS — Anthropic path", () => {
 
   it("calls stream.end() exactly once across the Anthropic path (no double-end regression)", async () => {
     // Spy on the prototype of the stream returned by the public factory.
-    const piAi = await import("@mariozechner/pi-ai");
+    const piAi = await import("@earendil-works/pi-ai");
     const sample = piAi.createAssistantMessageEventStream();
     const proto = Object.getPrototypeOf(sample);
     const endSpy = vi.spyOn(proto, "end");

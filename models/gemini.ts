@@ -28,7 +28,7 @@ export const GEMINI_MODELS: VertexModelConfig[] = [
     },
     region: "global",
   },
-  
+
   // --- Gemini 3.7 (GA - pricing until 12/31/26) ---
   {
     id: "gemini-3.7-flash",
@@ -49,7 +49,7 @@ export const GEMINI_MODELS: VertexModelConfig[] = [
     },
     region: "global",
   },
-  
+
   // --- Gemini 3.6 (GA - pricing until 12/31/26) ---
   {
     id: "gemini-3.6-flash",
@@ -70,7 +70,7 @@ export const GEMINI_MODELS: VertexModelConfig[] = [
     },
     region: "global",
   },
-  
+
   // --- Gemini 3.5 (GA) ---
   {
     id: "gemini-3.5-flash",

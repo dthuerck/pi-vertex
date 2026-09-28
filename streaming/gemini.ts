@@ -8,13 +8,14 @@
  * - Usage tracking including thinking tokens
  */
 
-import { FinishReason, GoogleGenAI, ThinkingLevel } from "@google/genai";
 import {
   type AssistantMessageEventStream,
   createAssistantMessageEventStream,
-} from "@mariozechner/pi-ai";
-import { getAuthConfig, resolveLocation } from "../auth.js";
-import type { AssistantMessage, Context, StreamOptions, VertexModelConfig } from "../types.js";
+} from "@earendil-works/pi-ai";
+import { FinishReason, GoogleGenAI, ThinkingLevel } from "@google/genai";
+import { getAuthConfig, getGoogleAuthOptions, resolveLocation } from "../auth.js";
+import { type ProviderContext, resolveContext } from "../transcript.js";
+import type { AssistantMessage, StreamOptions, ToolCall, VertexModelConfig } from "../types.js";
 import {
   calculateCost,
   convertToGeminiMessages,
@@ -63,10 +64,17 @@ function mapGeminiStopReason(reason: string): "stop" | "length" | "toolUse" | "e
   }
 }
 
+function dropNullHeaders(headers: Record<string, string | null>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).filter((entry): entry is [string, string] => entry[1] !== null),
+  );
+}
+
 export function streamGemini(
   model: VertexModelConfig,
-  context: Context,
+  context: ProviderContext,
   options?: StreamOptions,
+  piModel?: unknown,
 ): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream();
 
@@ -90,7 +98,7 @@ export function streamGemini(
     };
 
     try {
-      // Priority: config file > env var > model region > default
+      // Priority: env var > model region > default
       const location = resolveLocation(model.region);
       const auth = getAuthConfig(location);
 
@@ -100,10 +108,15 @@ export function streamGemini(
         project: auth.projectId,
         location: auth.location,
         apiVersion: "v1",
+        googleAuthOptions: getGoogleAuthOptions(),
+        ...(options?.headers ? { httpOptions: { headers: dropNullHeaders(options.headers) } } : {}),
       });
 
+      // pi >= 0.87: system prompt and tools live in transcript system messages.
+      const resolved = resolveContext(context);
+
       // Convert messages with model ID for proper thinking/tool handling
-      const contents = convertToGeminiMessages(context.messages, model.apiId);
+      const contents = convertToGeminiMessages(resolved.messages, model.apiId);
 
       // Build config — only set temperature when explicitly provided.
       // The Vertex Gemini config shape is sprawling and not exhaustively typed by
@@ -114,13 +127,13 @@ export function streamGemini(
       };
 
       // Add system prompt if present
-      if (context.systemPrompt) {
-        config.systemInstruction = sanitizeText(context.systemPrompt);
+      if (resolved.systemPrompt) {
+        config.systemInstruction = sanitizeText(resolved.systemPrompt);
       }
 
       // Add tools if present (using parametersJsonSchema for full JSON Schema support)
-      if (context.tools && context.tools.length > 0) {
-        config.tools = convertToolsForGemini(context.tools);
+      if (resolved.tools.length > 0) {
+        config.tools = convertToolsForGemini(resolved.tools);
       }
 
       // Add thinking configuration (matches pi-mono's buildParams logic)
@@ -170,14 +183,29 @@ export function streamGemini(
         config.abortSignal = options.signal;
       }
 
-      stream.push({ type: "start", partial: output });
-
-      // Start streaming
-      const response = await client.models.generateContentStream({
+      // Let other extensions inspect or replace the request (pi >= 0.87 contract).
+      // abortSignal is kept out of the inspected payload and re-attached afterwards.
+      const { abortSignal, ...inspectableConfig } = config;
+      let params: Record<string, unknown> = {
         model: model.apiId,
         contents,
-        config,
-      });
+        config: inspectableConfig,
+      };
+      const replacement = await options?.onPayload?.(params, piModel ?? model);
+      if (replacement !== undefined && replacement !== null) {
+        params = replacement as Record<string, unknown>;
+      }
+      if (abortSignal) {
+        params.config = { ...((params.config as Record<string, unknown>) ?? {}), abortSignal };
+      }
+
+      // Start streaming
+      const response = await client.models.generateContentStream(
+        params as unknown as Parameters<typeof client.models.generateContentStream>[0],
+      );
+
+      stream.push({ type: "start", partial: output });
+      let responseReported = false;
 
       // Track current content block for thinking/text transitions.
       // We hold a reference to the most recently appended block in output.content
@@ -192,6 +220,15 @@ export function streamGemini(
       let currentBlockType: "text" | "thinking" | null = null;
 
       for await (const chunk of response) {
+        if (!responseReported) {
+          responseReported = true;
+          // The SDK only exposes response headers on the parsed chunks; a chunk
+          // arriving at all implies a successful (2xx) HTTP response.
+          await options?.onResponse?.(
+            { status: 200, headers: chunk.sdkHttpResponse?.headers ?? {} },
+            piModel ?? model,
+          );
+        }
         output.responseId ||= chunk.responseId;
         const candidate = chunk.candidates?.[0];
 
@@ -309,7 +346,7 @@ export function streamGemini(
                 type: "toolCall" as const,
                 id: toolCallId,
                 name: part.functionCall.name || "",
-                arguments: (part.functionCall.args as Record<string, unknown>) ?? {},
+                arguments: (part.functionCall.args ?? {}) as ToolCall["arguments"],
                 ...(part.thoughtSignature && { thoughtSignature: part.thoughtSignature }),
               };
 
@@ -391,7 +428,11 @@ export function streamGemini(
         throw new Error(output.errorMessage || "An unknown error occurred");
       }
 
-      stream.push({ type: "done", reason: output.stopReason, message: output });
+      stream.push({
+        type: "done",
+        reason: output.stopReason as "stop" | "length" | "toolUse",
+        message: output,
+      });
       stream.end();
     } catch (error) {
       output.stopReason = options?.signal?.aborted ? "aborted" : "error";

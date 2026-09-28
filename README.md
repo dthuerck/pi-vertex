@@ -1,9 +1,14 @@
-# pi-vertex
+# pi-vertex-gemini
 
-[![npm version](https://img.shields.io/npm/v/@lhl/pi-vertex)](https://www.npmjs.com/package/@lhl/pi-vertex)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A Google Vertex AI provider for the [Pi Coding Agent](https://pi.dev) — giving you access to Gemini, Claude, Llama, DeepSeek, Qwen, Mistral, and other MaaS models through a single provider, billed through your GCP project.
+
+> **pi-vertex-gemini** is a rename of [`@lhl/pi-vertex`](https://github.com/lhl/pi-vertex),
+> updated for **pi 0.87** (`@earendil-works/*` packages, `TranscriptContext`, and the
+> `onPayload` / `onResponse` / `fetch` provider hooks) and switched to env-var-only
+> configuration shared with `pi-vertex-anthropic`. It still also works on older pi
+> releases. The provider id remains `vertex`, so existing `vertex/<model>` settings keep working.
 
 ## About this fork
 
@@ -15,7 +20,7 @@ This fork is created to add new models, fix some bugs, add tests, and to move ou
 
 | Improvement | Details |
 |-------------|---------|
-| **88 unit tests** | `auth.ts`, `config.ts`, `utils.ts`, `models/`, `streaming/index.ts`, `streaming/gemini.ts`, `streaming/maas.ts`, `convertToGeminiMessages` — covering message conversion, tool call normalization, cost calculation, auth resolution, model validation |
+| **88 unit tests** | `auth.ts`, `transcript.ts`, `utils.ts`, `models/`, `streaming/index.ts`, `streaming/gemini.ts`, `streaming/maas.ts`, `convertToGeminiMessages` — covering message conversion, tool call normalization, cost calculation, auth resolution, model validation |
 | **GitHub Actions CI** | Type-check (`tsc --noEmit`), lint (`biome check`), test + coverage on every push/PR |
 | **Biome linting/formatting** | Catches `noExplicitAny`, enforces import sorting, consistent formatting |
 | **Real npm scripts** | `build`, `check`, `test`, `test:coverage`, `clean` |
@@ -32,8 +37,8 @@ This fork is created to add new models, fix some bugs, add tests, and to move ou
 ![pi-vertex model selector](https://raw.githubusercontent.com/lhl/pi-vertex/main/screenshot.png)
 
 ```bash
-pi install npm:@lhl/pi-vertex
-export GOOGLE_CLOUD_PROJECT=your-project-id
+pi install /path/to/pi-vertex-gemini
+export ANTHROPIC_VERTEX_PROJECT_ID=your-project-id
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
 ```
 
@@ -41,8 +46,8 @@ Set your GCP project and credentials. Vertex AI models (Gemini, Claude, Llama, D
 
 ## Features
 
-- **43 models** across 4 categories:
-  - **Gemini** (9): 3.5 Flash, 3.1 Pro, 3.1 Flash-Lite, 3 Flash, 2.5 Pro, 2.5 Flash, 2.5 Flash-Lite, 2.0 Flash, and 2.0 Flash-Lite
+- **47 models** across 4 categories:
+  - **Gemini** (13): 3.8 Flash, 3.7 Flash, 3.6 Flash, 3.5 Flash, 3.5 Flash-Lite, 3.1 Pro, 3.1 Flash-Lite, 3 Flash, 2.5 Pro, 2.5 Flash, 2.5 Flash-Lite, 2.0 Flash, and 2.0 Flash-Lite
   - **Claude** (10): Opus 4.7, Opus 4.6, Sonnet 4.6, 4.5, 4.1, 4, Haiku 4.5, 3.5 Sonnet v2
   - **Llama** (3): 4 Maverick, 4 Scout, 3.3 70B
   - **Other MaaS** (21): Grok, Gemma, Mistral, DeepSeek, Qwen, OpenAI GPT-OSS, Kimi, MiniMax, GLM
@@ -57,60 +62,41 @@ Set your GCP project and credentials. Vertex AI models (Gemini, Claude, Llama, D
 ## Installation
 
 ```bash
-# Via pi (recommended)
-pi install npm:@lhl/pi-vertex
-
-# Or via npm
-npm install -g @lhl/pi-vertex
-
-# Or from source
-git clone https://github.com/lhl/pi-vertex.git
-cd pi-vertex
+git clone <this repo> pi-vertex-gemini
+cd pi-vertex-gemini
 npm install
-# pi install /path/to/pi-vertex
+pi install /path/to/pi-vertex-gemini
 ```
 
 ## Setup
 
-### 1. Authenticate with Google Cloud
+Configuration is read **only from environment variables** (no `/login` flow, no config
+file). The variable names match [`pi-vertex-anthropic`](https://github.com/skyfallsin/pi-vertex-anthropic),
+so a single set of exports in your shell config serves both extensions.
 
 ```bash
-# Option A: User credentials (development)
-gcloud auth application-default login
-
-# Option B: Service account (production)
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+# Add to ~/.zshrc or ~/.bashrc
+export ANTHROPIC_VERTEX_PROJECT_ID="your-gcp-project-id"   # or VERTEX_PROJECT_ID
+export CLOUD_ML_REGION="global"                              # or VERTEX_REGION (e.g. eu, us, europe-west1)
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"  # or VERTEX_SERVICE_ACCOUNT_KEY
 ```
 
-### 2. Set environment variables
+### Recognized environment variables
 
-```bash
-# Required: Your GCP project ID
-export GOOGLE_CLOUD_PROJECT=your-project-id
+| Setting | Primary | Aliases (in resolution order) |
+|---------|---------|-------------------------------|
+| GCP project (required) | `VERTEX_PROJECT_ID` | `ANTHROPIC_VERTEX_PROJECT_ID`, `GOOGLE_CLOUD_PROJECT`, `GCLOUD_PROJECT` |
+| Region | `VERTEX_REGION` | `CLOUD_ML_REGION`, `GOOGLE_CLOUD_LOCATION` |
+| Service account key | `VERTEX_SERVICE_ACCOUNT_KEY` | `GOOGLE_APPLICATION_CREDENTIALS` |
 
-# Optional: Override default region
-export GOOGLE_CLOUD_LOCATION=us-central1
-```
+For each setting the first non-empty variable wins. If no region is set, each model's
+default region is used (`global` for almost all models). If no key file is set, Google
+Application Default Credentials are used (e.g. `gcloud auth application-default login`).
 
-### 3. Configuration file (optional)
+Multi-region locations `us` and `eu` are supported and routed to
+`aiplatform.{us,eu}.rep.googleapis.com`.
 
-For persistent settings, create `~/.pi/agent/settings/pi-vertex.json`:
-
-```json
-{
-  "googleCloudProject": "my-gcp-project",
-  "googleCloudLocation": "us-central1",
-  "googleApplicationCredentials": "/path/to/service-account.json"
-}
-```
-
-Config file values take priority over environment variables.
-
-### 4. Verify setup
-
-```bash
-pi --provider vertex --model gemini-2.5-pro --version
-```
+If no project ID is found, the extension logs a warning and does not register the provider.
 
 ## Usage
 
@@ -133,13 +119,13 @@ Add to `~/.bashrc` or `~/.zshrc`:
 
 ```bash
 # Claude 4.7 Opus
-alias pic="GOOGLE_CLOUD_PROJECT=your-project pi --provider vertex --model claude-opus-4-7"
+alias pic="VERTEX_PROJECT_ID=your-project pi --provider vertex --model claude-opus-4-7"
 
 # Gemini 2.5 Pro
-alias pig="GOOGLE_CLOUD_PROJECT=your-project pi --provider vertex --model gemini-2.5-pro"
+alias pig="VERTEX_PROJECT_ID=your-project pi --provider vertex --model gemini-2.5-pro"
 
 # Llama 4 Maverick
-alias pil="GOOGLE_CLOUD_PROJECT=your-project pi --provider vertex --model llama-4-maverick"
+alias pil="VERTEX_PROJECT_ID=your-project pi --provider vertex --model llama-4-maverick"
 ```
 
 ## Model Reference
@@ -148,7 +134,11 @@ alias pil="GOOGLE_CLOUD_PROJECT=your-project pi --provider vertex --model llama-
 
 | Model | Context | Max Tokens | Input | Reasoning | Price (in/out) |
 |-------|---------|------------|-------|-----------|----------------|
+| gemini-3.8-flash | 1M | 65,535 | text, image | ✅ | $0.75/$3.75 |
+| gemini-3.7-flash | 1M | 65,535 | text, image | ✅ | $0.75/$3.75 |
+| gemini-3.6-flash | 1M | 65,535 | text, image | ✅ | $0.75/$3.75 |
 | gemini-3.5-flash | 1M | 65,535 | text, image | ✅ | $1.50/$9.00 |
+| gemini-3.5-flash-lite | 1M | 65,535 | text, image | ✅ | $0.30/$2.50 |
 | gemini-3.1-pro | 1M | 65,536 | text, image | ✅ | $2.00/$12.00 |
 | gemini-3.1-flash-lite | 1M | 65,535 | text, image | ✅ | $0.25/$1.50 |
 | gemini-3-flash | 1M | 65,536 | text, image | ✅ | $0.50/$3.00 |
@@ -223,7 +213,7 @@ Default regions by model:
 
 Override with:
 ```bash
-export GOOGLE_CLOUD_LOCATION=us-central1
+export VERTEX_REGION=us-central1   # or CLOUD_ML_REGION / GOOGLE_CLOUD_LOCATION
 ```
 
 ## Architecture
@@ -235,7 +225,8 @@ export GOOGLE_CLOUD_LOCATION=us-central1
        │ registerProvider("vertex")
        ▼
 ┌─────────────┐
-│  pi-vertex  │
+│ pi-vertex-  │
+│   gemini    │
 └──────┬──────┘
        │ streamSimple(model, context, options)
        ▼
@@ -252,9 +243,9 @@ export GOOGLE_CLOUD_LOCATION=us-central1
 
 - `@google/genai`: Google GenAI SDK for Gemini models
 - `@anthropic-ai/vertex-sdk`: Official Anthropic-on-Vertex SDK for Claude models (native streaming)
-- `google-auth-library`: ADC authentication for all models
-- `@mariozechner/pi-ai`: Peer dependency
-- `@mariozechner/pi-coding-agent`: Peer dependency
+- `google-auth-library`: service account / ADC authentication for all models
+- `@earendil-works/pi-ai`: Peer dependency
+- `@earendil-works/pi-coding-agent`: Peer dependency
 
 ## License
 

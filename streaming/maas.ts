@@ -18,10 +18,19 @@ import {
   type Model,
   calculateCost,
   createAssistantMessageEventStream,
-  streamSimpleOpenAICompletions,
-} from "@mariozechner/pi-ai";
-import { buildBaseUrl, getAccessToken, getAuthConfig, resolveLocation } from "../auth.js";
-import type { Context, StreamOptions, VertexModelConfig } from "../types.js";
+} from "@earendil-works/pi-ai";
+// Legacy per-API stream wrappers live on the compat entrypoint since pi 0.87.
+import { streamSimpleOpenAICompletions } from "@earendil-works/pi-ai/compat";
+import {
+  buildBaseUrl,
+  getAccessToken,
+  getAuthConfig,
+  getGoogleAuth,
+  resolveLocation,
+  resolveVertexHost,
+} from "../auth.js";
+import { type ProviderContext, type ResolvedContext, resolveContext } from "../transcript.js";
+import type { StreamOptions, VertexModelConfig } from "../types.js";
 
 function mapAnthropicEffort(reasoning?: string): "low" | "medium" | "high" | "max" | undefined {
   if (!reasoning) return undefined;
@@ -53,9 +62,10 @@ function isValidThinkingSignature(signature?: string): boolean {
  */
 async function streamAnthropic(
   model: VertexModelConfig,
-  context: Context,
+  context: ResolvedContext,
   options: StreamOptions | undefined,
   stream: ReturnType<typeof createAssistantMessageEventStream>,
+  piModel: unknown,
 ): Promise<void> {
   const location = resolveLocation(model.region);
   const auth = getAuthConfig(location);
@@ -68,6 +78,10 @@ async function streamAnthropic(
   const client = new AnthropicVertex({
     projectId: auth.projectId,
     region: auth.location,
+    // The SDK doesn't know the multi-region (us/eu) hosts, so always pass the base URL.
+    baseURL: `https://${resolveVertexHost(auth.location)}/v1`,
+    googleAuth: getGoogleAuth() as any,
+    ...(options?.fetch ? { fetch: options.fetch as any } : {}),
   });
 
   // Build messages with Anthropic-compatible tool-use/tool-result sequencing.
@@ -238,7 +252,7 @@ async function streamAnthropic(
   }
 
   // Build tools
-  const tools = context.tools?.map((t: any) => ({
+  const tools = context.tools.map((t: any) => ({
     name: t.name,
     description: t.description,
     input_schema: {
@@ -248,7 +262,7 @@ async function streamAnthropic(
     },
   }));
 
-  const params: any = {
+  let params: any = {
     model: model.apiId,
     max_tokens: options?.maxTokens || model.maxTokens,
     messages,
@@ -286,9 +300,21 @@ async function streamAnthropic(
     timestamp: Date.now(),
   };
 
-  stream.push({ type: "start", partial: output });
+  // Let other extensions inspect or replace the request (pi >= 0.87 contract).
+  const replacement = await options?.onPayload?.(params, piModel ?? model);
+  if (replacement !== undefined && replacement !== null) params = replacement;
 
-  const anthropicStream = client.messages.stream(params, { signal: options?.signal });
+  const anthropicStream: any = client.messages.stream(params, { signal: options?.signal });
+
+  if (typeof anthropicStream.withResponse === "function") {
+    const { response } = await anthropicStream.withResponse();
+    await options?.onResponse?.(
+      { status: response.status, headers: Object.fromEntries(response.headers.entries()) },
+      piModel ?? model,
+    );
+  }
+
+  stream.push({ type: "start", partial: output });
 
   for await (const event of anthropicStream) {
     if (event.type === "message_start") {
@@ -416,8 +442,9 @@ async function streamAnthropic(
 
 export function streamMaaS(
   model: VertexModelConfig,
-  context: Context,
+  context: ProviderContext,
   options?: StreamOptions,
+  piModel?: unknown,
 ): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream();
 
@@ -431,7 +458,7 @@ export function streamMaaS(
         // streamAnthropic is lifecycle-neutral (pushes start/deltas/done but
         // does not call stream.end()), so we own end() here. This matches the
         // OpenAI-compat path below, which also ends the stream after relaying.
-        await streamAnthropic(model, context, options, stream);
+        await streamAnthropic(model, resolveContext(context), options, stream, piModel);
         stream.end();
         return;
       }
@@ -465,6 +492,8 @@ export function streamMaaS(
         },
       };
 
+      // pi-ai's OpenAI-completions implementation handles both context shapes itself
+      // and honors onPayload / onResponse / fetch from the forwarded options.
       const innerStream = streamSimpleOpenAICompletions(modelForPi, context as any, {
         ...options,
         apiKey: accessToken,

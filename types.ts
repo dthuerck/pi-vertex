@@ -1,5 +1,5 @@
 /**
- * Type definitions for pi-vertex extension
+ * Type definitions for pi-vertex-gemini extension
  *
  * Core message/content types are re-exported from pi-ai to ensure pi-vertex
  * handles the full message structure (thinking blocks, tool calls, tool results)
@@ -22,7 +22,7 @@ export type {
   ToolResultMessage,
   Usage,
   UserMessage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 
 // Vertex-specific types
 
@@ -60,9 +60,30 @@ export interface AuthConfig {
   credentials?: string;
 }
 
+export interface ProviderResponseInfo {
+  status: number;
+  headers: Record<string, string>;
+}
+
+/**
+ * Subset of pi-ai's SimpleStreamOptions used by this extension. Declared locally so the
+ * extension type-checks against both pre- and post-0.87 pi-ai.
+ */
 export interface StreamOptions {
   maxTokens?: number;
   temperature?: number;
-  reasoning?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  reasoning?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   signal?: AbortSignal;
+  /** Inspect or replace the provider payload before it is sent (pi >= 0.87). */
+  // biome-ignore lint/suspicious/noExplicitAny: model type differs between pi versions
+  onPayload?: (payload: unknown, model: any) => unknown | undefined | Promise<unknown | undefined>;
+  /** Report the HTTP response before its body is consumed (pi >= 0.87). */
+  // biome-ignore lint/suspicious/noExplicitAny: model type differs between pi versions
+  onResponse?: (response: ProviderResponseInfo, model: any) => void | Promise<void>;
+  /** Custom fetch implementation for provider HTTP requests (pi >= 0.87). */
+  fetch?: typeof fetch;
+  headers?: Record<string, string | null>;
+  maxRetries?: number;
+  maxRetryDelayMs?: number;
+  timeoutMs?: number;
 }
